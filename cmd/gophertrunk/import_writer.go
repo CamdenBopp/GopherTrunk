@@ -58,14 +58,14 @@ func mergeIntoConfig(systems []parsedSystem, opts mergeOptions) (mergeResult, er
 	if b, err := os.ReadFile(opts.ConfigPath); err == nil {
 		existingBytes = b
 	} else if !errors.Is(err, os.ErrNotExist) {
-		return res, fmt.Errorf("import-pdf: read %s: %w", opts.ConfigPath, err)
+		return res, fmt.Errorf("import: read %s: %w", opts.ConfigPath, err)
 	}
 
 	// Decode into struct for schema validation.
 	var cfg config.Config
 	if len(existingBytes) > 0 {
 		if err := yaml.Unmarshal(existingBytes, &cfg); err != nil {
-			return res, fmt.Errorf("import-pdf: parse %s: %w", opts.ConfigPath, err)
+			return res, fmt.Errorf("import: parse %s: %w", opts.ConfigPath, err)
 		}
 	}
 
@@ -95,24 +95,37 @@ func mergeIntoConfig(systems []parsedSystem, opts mergeOptions) (mergeResult, er
 		slug := buildSlug(sys.Name, sys.SysID)
 		csvPath := filepath.Join(csvDir, "talkgroups-"+slug+".csv")
 		entry := config.SystemConfig{
-			Name:            sys.Name,
-			Protocol:        sys.Protocol,
-			ControlChannels: collectControlChannels(sys),
-			TalkgroupFile:   csvPath,
+			Name:               sys.Name,
+			Protocol:           sys.Protocol,
+			ControlChannels:    collectControlChannels(sys),
+			TalkgroupFile:      csvPath,
+			P25Phase1DemodMode: sys.P25DemodMode,
 		}
-		newSystems = append(newSystems, entry)
 
 		// Generate CSV.
 		csvBytes, err := buildTalkgroupCSV(sys)
 		if err != nil {
-			return res, fmt.Errorf("import-pdf: build CSV for %q: %w", sys.Name, err)
+			return res, fmt.Errorf("import: build CSV for %q: %w", sys.Name, err)
 		}
 		res.CSVs = append(res.CSVs, csvOutput{Path: csvPath, Data: csvBytes})
+
+		// Radio-ID aliases get their own catalogue alongside the talkgroups.
+		// Only sources that carry RIDs (SDRTrunk playlists) produce one.
+		if len(sys.Radios) > 0 {
+			ridPath := filepath.Join(csvDir, "rids-"+slug+".csv")
+			ridBytes, err := buildRIDCSV(sys)
+			if err != nil {
+				return res, fmt.Errorf("import: build RID CSV for %q: %w", sys.Name, err)
+			}
+			entry.RIDAliasFile = ridPath
+			res.CSVs = append(res.CSVs, csvOutput{Path: ridPath, Data: ridBytes})
+		}
+		newSystems = append(newSystems, entry)
 
 		// Collision check.
 		if idx, ok := existing[strings.ToLower(sys.Name)]; ok {
 			if !opts.Force {
-				return res, fmt.Errorf("import-pdf: system %q already exists in %s (use --force to overwrite)", sys.Name, opts.ConfigPath)
+				return res, fmt.Errorf("import: system %q already exists in %s (use --force to overwrite)", sys.Name, opts.ConfigPath)
 			}
 			cfg.Trunking.Systems[idx] = entry
 			res.Changes = append(res.Changes, fmt.Sprintf("overwrite system %q (%d CCs, %d talkgroups → %s)", sys.Name, len(entry.ControlChannels), len(sys.Talkgroups), csvPath))
@@ -124,7 +137,7 @@ func mergeIntoConfig(systems []parsedSystem, opts mergeOptions) (mergeResult, er
 
 	// Validate the in-memory merged config before touching the file.
 	if err := cfg.Validate(); err != nil {
-		return res, fmt.Errorf("import-pdf: merged config fails validation: %w", err)
+		return res, fmt.Errorf("import: merged config fails validation: %w", err)
 	}
 
 	// Comment-preserving merge into the *yaml.Node tree.
@@ -137,10 +150,10 @@ func mergeIntoConfig(systems []parsedSystem, opts mergeOptions) (mergeResult, er
 	// didn't drift from the struct path.
 	var roundTrip config.Config
 	if err := yaml.Unmarshal(yamlBytes, &roundTrip); err != nil {
-		return res, fmt.Errorf("import-pdf: round-trip parse: %w", err)
+		return res, fmt.Errorf("import: round-trip parse: %w", err)
 	}
 	if err := roundTrip.Validate(); err != nil {
-		return res, fmt.Errorf("import-pdf: round-trip validate: %w", err)
+		return res, fmt.Errorf("import: round-trip validate: %w", err)
 	}
 	res.ConfigYAML = yamlBytes
 
@@ -150,7 +163,7 @@ func mergeIntoConfig(systems []parsedSystem, opts mergeOptions) (mergeResult, er
 
 	// Write CSVs first (atomic rename), then the config.
 	if err := os.MkdirAll(csvDir, 0o755); err != nil {
-		return res, fmt.Errorf("import-pdf: mkdir %s: %w", csvDir, err)
+		return res, fmt.Errorf("import: mkdir %s: %w", csvDir, err)
 	}
 	for _, c := range res.CSVs {
 		if err := writeAtomic(c.Path, c.Data, 0o644); err != nil {
@@ -281,6 +294,45 @@ func buildTalkgroupCSV(sys parsedSystem) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
+// buildRIDCSV produces the radio-ID alias catalogue that the daemon's
+// internal/trunking.LoadRIDCSV understands. Column order matches that
+// loader's case-insensitive lookups.
+func buildRIDCSV(sys parsedSystem) ([]byte, error) {
+	var buf bytes.Buffer
+	w := csv.NewWriter(&buf)
+	headers := []string{"Decimal", "Alias", "Description", "Tag", "Group", "Priority", "Lockout"}
+	if err := w.Write(headers); err != nil {
+		return nil, err
+	}
+	for _, r := range sys.Radios {
+		priority := ""
+		if r.Priority > 0 {
+			priority = strconv.Itoa(r.Priority)
+		}
+		lockout := ""
+		if r.Lockout {
+			lockout = "Y"
+		}
+		row := []string{
+			strconv.FormatUint(uint64(r.Dec), 10),
+			r.Alias,
+			r.Description,
+			r.Tag,
+			r.Group,
+			priority,
+			lockout,
+		}
+		if err := w.Write(row); err != nil {
+			return nil, err
+		}
+	}
+	w.Flush()
+	if err := w.Error(); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
 // mergeYAMLNodes does the comment-preserving merge: decode → walk →
 // append/replace mapping nodes in trunking.systems → re-encode.
 //
@@ -290,14 +342,14 @@ func mergeYAMLNodes(existing []byte, parsed []parsedSystem, newEntries []config.
 	var doc yaml.Node
 	if len(existing) > 0 {
 		if err := yaml.Unmarshal(existing, &doc); err != nil {
-			return nil, fmt.Errorf("import-pdf: yaml decode: %w", err)
+			return nil, fmt.Errorf("import: yaml decode: %w", err)
 		}
 	}
 	if doc.Kind == 0 {
 		doc = yaml.Node{Kind: yaml.DocumentNode, Content: []*yaml.Node{{Kind: yaml.MappingNode, Tag: "!!map"}}}
 	}
 	if len(doc.Content) == 0 || doc.Content[0].Kind != yaml.MappingNode {
-		return nil, errors.New("import-pdf: config root is not a mapping")
+		return nil, errors.New("import: config root is not a mapping")
 	}
 	root := doc.Content[0]
 
@@ -317,7 +369,7 @@ func mergeYAMLNodes(existing []byte, parsed []parsedSystem, newEntries []config.
 		node := buildSystemMappingNode(entry)
 		if idx, ok := existingIdx[strings.ToLower(sys.Name)]; ok {
 			if !force {
-				return nil, fmt.Errorf("import-pdf: system %q already exists (use --force)", sys.Name)
+				return nil, fmt.Errorf("import: system %q already exists (use --force)", sys.Name)
 			}
 			systemsNode.Content[idx] = node
 		} else {
@@ -330,7 +382,7 @@ func mergeYAMLNodes(existing []byte, parsed []parsedSystem, newEntries []config.
 	enc := yaml.NewEncoder(&out)
 	enc.SetIndent(2)
 	if err := enc.Encode(&doc); err != nil {
-		return nil, fmt.Errorf("import-pdf: yaml encode: %w", err)
+		return nil, fmt.Errorf("import: yaml encode: %w", err)
 	}
 	if err := enc.Close(); err != nil {
 		return nil, err
@@ -390,7 +442,8 @@ func mapStringValue(m *yaml.Node, key string) string {
 
 // buildSystemMappingNode constructs a fresh mapping node for one
 // trunking.systems[] entry. Keys are emitted in a stable order
-// (name, protocol, control_channels, talkgroup_file).
+// (name, protocol, control_channels, talkgroup_file, then the optional
+// rid_alias_file / p25_phase1_demod_mode when the source supplied them).
 func buildSystemMappingNode(s config.SystemConfig) *yaml.Node {
 	m := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
 	addKV(m, "name", &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: s.Name})
@@ -406,6 +459,12 @@ func buildSystemMappingNode(s config.SystemConfig) *yaml.Node {
 	}
 	addKV(m, "control_channels", ccSeq)
 	addKV(m, "talkgroup_file", &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: s.TalkgroupFile})
+	if s.RIDAliasFile != "" {
+		addKV(m, "rid_alias_file", &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: s.RIDAliasFile})
+	}
+	if s.P25Phase1DemodMode != "" {
+		addKV(m, "p25_phase1_demod_mode", &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: s.P25Phase1DemodMode})
+	}
 	return m
 }
 
@@ -422,13 +481,13 @@ func writeAtomic(path string, b []byte, mode os.FileMode) error {
 	dir := filepath.Dir(path)
 	tmp, err := os.CreateTemp(dir, filepath.Base(path)+".tmp-*")
 	if err != nil {
-		return fmt.Errorf("import-pdf: tempfile %s: %w", path, err)
+		return fmt.Errorf("import: tempfile %s: %w", path, err)
 	}
 	tmpPath := tmp.Name()
 	defer os.Remove(tmpPath) // best-effort cleanup on error path
 	if _, err := tmp.Write(b); err != nil {
 		tmp.Close()
-		return fmt.Errorf("import-pdf: write %s: %w", tmpPath, err)
+		return fmt.Errorf("import: write %s: %w", tmpPath, err)
 	}
 	if err := tmp.Chmod(mode); err != nil {
 		tmp.Close()
@@ -438,7 +497,7 @@ func writeAtomic(path string, b []byte, mode os.FileMode) error {
 		return err
 	}
 	if err := os.Rename(tmpPath, path); err != nil {
-		return fmt.Errorf("import-pdf: rename %s → %s: %w", tmpPath, path, err)
+		return fmt.Errorf("import: rename %s → %s: %w", tmpPath, path, err)
 	}
 	return nil
 }
@@ -446,7 +505,7 @@ func writeAtomic(path string, b []byte, mode os.FileMode) error {
 // renderDryRun produces the human-readable diff-like summary for
 // --dry-run mode. Writes to w.
 func renderDryRun(w io.Writer, res mergeResult, configPath string) {
-	fmt.Fprintln(w, "import-pdf: dry-run — no files written")
+	fmt.Fprintln(w, "import: dry-run — no files written")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Changes:")
 	for _, c := range res.Changes {

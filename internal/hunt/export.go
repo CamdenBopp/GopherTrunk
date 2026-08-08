@@ -13,7 +13,7 @@ type Format int
 const (
 	// FormatBundle is GopherTrunk's multi-section CSV import bundle (the exact
 	// reverse of cmd/gophertrunk/import_csv.go parseCSVStream — it round-trips
-	// straight back into config.yaml via `import-pdf -csv`).
+	// straight back into config.yaml via `import -csv`).
 	FormatBundle Format = iota
 	// FormatTrunkRecorder is a trunk-recorder JSON system config stanza.
 	FormatTrunkRecorder

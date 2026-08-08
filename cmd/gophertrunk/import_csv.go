@@ -55,7 +55,7 @@ func bomStrippedReader(r io.Reader) io.Reader {
 func parseCSVFile(path string, opts csvImportOpts) (parsedSystem, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return parsedSystem{}, fmt.Errorf("import-pdf: open %s: %w", path, err)
+		return parsedSystem{}, fmt.Errorf("import: open %s: %w", path, err)
 	}
 	// RadioReference CSVs exported through Excel on Windows carry a
 	// UTF-8 BOM; strip it before sniffing/parsing so it can't mangle the
@@ -80,7 +80,7 @@ func parseCSVFile(path string, opts csvImportOpts) (parsedSystem, error) {
 		sys, err = parseCSVStream(bytes.NewReader(data))
 	}
 	if err != nil {
-		return parsedSystem{}, fmt.Errorf("import-pdf: %s: %w", path, err)
+		return parsedSystem{}, fmt.Errorf("import: %s: %w", path, err)
 	}
 	sys.SourcePath = path
 	return sys, nil

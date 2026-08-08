@@ -23,7 +23,7 @@ type Reporter struct {
 	In          *os.File   // defaults to os.Stdin (prompt source)
 	Collector   *Collector // banner source; lazily falls back to NewCollector()
 	Verbose     bool       // diagnostics.verbose_errors (config/env/flag resolved)
-	Prefix      string     // message prefix, e.g. "config", "import-pdf"; "" for none
+	Prefix      string     // message prefix, e.g. "config", "import"; "" for none
 	interactive func() bool
 }
 

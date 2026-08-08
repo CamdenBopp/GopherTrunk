@@ -5,13 +5,14 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/MattCheramie/GopherTrunk/internal/configbuilder"
 	"github.com/MattCheramie/GopherTrunk/internal/diag"
 )
 
-// runImport is the entry point for `gophertrunk import-pdf`. Parses
+// runImport is the entry point for `gophertrunk import`. Parses
 // one or more RadioReference PDFs and merges them into the user's
 // config.yaml + per-system talkgroup CSVs.
 //
@@ -22,7 +23,7 @@ import (
 //	-dry-run           print diff, write nothing
 //	-force             overwrite an existing system block with the same name
 func runImport(args []string) {
-	fs := flag.NewFlagSet("import-pdf", flag.ExitOnError)
+	fs := flag.NewFlagSet("import", flag.ExitOnError)
 	cfgPath := fs.String("config", configbuilder.DefaultConfigPath(), "path to existing config.yaml (merged in place)")
 	csvDir := fs.String("csv-dir", "", "directory to write talkgroup CSVs (default: directory of -config)")
 	noTUI := fs.Bool("no-tui", false, "skip the review TUI and write straight from parsed defaults")
@@ -35,10 +36,12 @@ func runImport(args []string) {
 	verboseFlag := fs.Bool("verbose-errors", false, "print full error chain + stack on failures")
 	var pdfPaths repeatedString
 	var csvPaths repeatedString
+	var sdrtrunkPaths repeatedString
 	fs.Var(&pdfPaths, "pdf", "path to a RadioReference PDF system export (repeatable)")
 	fs.Var(&csvPaths, "csv", "path to a CSV file (repeatable). Either a multi-section bundle (see docs/import.md) or RadioReference's native /db/sid/<sid>/download CSV.")
+	fs.Var(&sdrtrunkPaths, "sdrtrunk", "path to an SDRTrunk playlist XML, its directory, or \"auto\" for SDRTrunk's default location (repeatable)")
 	fs.Usage = func() {
-		fmt.Fprintf(fs.Output(), `gophertrunk import-pdf — import system definitions into config.yaml
+		fmt.Fprintf(fs.Output(), `gophertrunk import — import system definitions into config.yaml
 
 Sources:
   -pdf <file.pdf>   RadioReference.com PDF export (auto-extracts metadata,
@@ -52,11 +55,20 @@ Sources:
                     RR CSVs carry no metadata — combine with -name / -sysid
                     to supply it (the filename stem is used when -name is
                     omitted).
+  -sdrtrunk <path>  An SDRTrunk playlist XML — SDRTrunk's own configuration
+                    file, holding its channels (control-channel frequencies,
+                    decoder + modulation per site) and its alias lists
+                    (talkgroups and radio IDs). One playlist may import
+                    several systems at once. Accepts the playlist file, the
+                    directory holding it, SDRTrunk's data root, the macOS
+                    SDRTrunk.app bundle, or "auto" to discover the default
+                    location (~/SDRTrunk/playlist).
 
-Both flags are repeatable and may be combined in a single invocation. The
-parsed systems are merged into config.yaml (preserving comments) and a
+All three flags are repeatable and may be combined in a single invocation.
+The parsed systems are merged into config.yaml (preserving comments) and a
 per-system Trunk-Recorder-style talkgroup CSV is written next to the config
-(or to -csv-dir).
+(or to -csv-dir). Sources carrying radio-ID aliases also get a per-system RID
+CSV wired up as rid_alias_file.
 
 Bug reports:
   -extract-only     Combined with a single -pdf, dumps the positioned-text
@@ -79,8 +91,9 @@ Config-file builder:
                     any imports to produce a daemon-startable scaffold.
 
 Usage:
-  gophertrunk import-pdf -pdf <file.pdf> [-pdf <file.pdf>...] [-csv <file.csv>...] [flags]
-  gophertrunk import-pdf -wizard                              (opens the Config Builder TUI)
+  gophertrunk import -pdf <file.pdf> [-pdf <file.pdf>...] [-csv <file.csv>...] [flags]
+  gophertrunk import -sdrtrunk auto                       (import your SDRTrunk playlist)
+  gophertrunk import -wizard                              (opens the Config Builder TUI)
   gophertrunk config                                          (build/edit config in the terminal)
 
 Flags:
@@ -89,19 +102,19 @@ Flags:
 	}
 	_ = fs.Parse(args)
 	resolveVerbose(*verboseFlag, false)
-	importRep = newReporter("import-pdf")
+	importRep = newReporter("import")
 
-	if !*wizard && len(pdfPaths) == 0 && len(csvPaths) == 0 {
+	if !*wizard && len(pdfPaths) == 0 && len(csvPaths) == 0 && len(sdrtrunkPaths) == 0 {
 		fs.Usage()
-		fail("at least one of -wizard, -pdf, or -csv is required")
+		fail("at least one of -wizard, -pdf, -csv, or -sdrtrunk is required")
 	}
 
 	// -extract-only is a diagnostic dump: must be paired with exactly
 	// one -pdf and nothing else, so we never silently merge anything
 	// when the operator just wanted to share a fixture.
 	if *extractOnly {
-		if *wizard || len(csvPaths) > 0 {
-			fail("-extract-only cannot be combined with -wizard or -csv")
+		if *wizard || len(csvPaths) > 0 || len(sdrtrunkPaths) > 0 {
+			fail("-extract-only cannot be combined with -wizard, -csv or -sdrtrunk")
 		}
 		if len(pdfPaths) != 1 {
 			fail("-extract-only requires exactly one -pdf <file>")
@@ -122,28 +135,28 @@ Flags:
 	// it. PDF/CSV passed alongside can be imported in the builder's Import
 	// dialog.
 	if *wizard {
-		if len(pdfPaths) > 0 || len(csvPaths) > 0 {
-			fmt.Fprintln(os.Stderr, "import-pdf: -wizard now opens the Config Builder; use its Import dialog to add the PDF/CSV.")
+		if len(pdfPaths) > 0 || len(csvPaths) > 0 || len(sdrtrunkPaths) > 0 {
+			fmt.Fprintln(os.Stderr, "import: -wizard now opens the Config Builder; use its Import dialog to add the PDF/CSV.")
 		}
 		runConfigTUI(nil)
 		return
 	}
 
-	if len(pdfPaths) == 0 && len(csvPaths) == 0 {
+	if len(pdfPaths) == 0 && len(csvPaths) == 0 && len(sdrtrunkPaths) == 0 {
 		// Wizard-only path already handled above.
 		return
 	}
 
 	// Parse every source up front. If any one fails we abort before
 	// touching the user's config.
-	parsed := make([]parsedSystem, 0, len(pdfPaths)+len(csvPaths))
+	parsed := make([]parsedSystem, 0, len(pdfPaths)+len(csvPaths)+len(sdrtrunkPaths))
 	for _, p := range pdfPaths {
 		sys, err := parsePDFFile(p)
 		if err != nil {
 			failErr(err)
 		}
 		parsed = append(parsed, sys)
-		fmt.Fprintf(os.Stderr, "import-pdf: parsed PDF %s: %s (%d sites, %d talkgroups)\n",
+		fmt.Fprintf(os.Stderr, "import: parsed PDF %s: %s (%d sites, %d talkgroups)\n",
 			p, sys.Name, len(sys.Sites), len(sys.Talkgroups))
 	}
 	csvOpts := csvImportOpts{Name: *nameOverride, SysID: *sysidOverride}
@@ -153,8 +166,26 @@ Flags:
 			failErr(err)
 		}
 		parsed = append(parsed, sys)
-		fmt.Fprintf(os.Stderr, "import-pdf: parsed CSV %s: %s (%d sites, %d talkgroups)\n",
+		fmt.Fprintf(os.Stderr, "import: parsed CSV %s: %s (%d sites, %d talkgroups)\n",
 			p, sys.Name, len(sys.Sites), len(sys.Talkgroups))
+	}
+	for _, p := range sdrtrunkPaths {
+		path, err := resolveSDRTrunkPlaylist(p)
+		if err != nil {
+			failErr(err)
+		}
+		systems, warnings, err := parseSDRTrunkPlaylist(path)
+		if err != nil {
+			failErr(err)
+		}
+		for _, w := range warnings {
+			fmt.Fprintf(os.Stderr, "import: SDRTrunk %s: %s\n", filepath.Base(path), w)
+		}
+		for _, sys := range systems {
+			parsed = append(parsed, sys)
+			fmt.Fprintf(os.Stderr, "import: parsed SDRTrunk playlist %s: %s (%s, %d sites, %d talkgroups, %d radio IDs)\n",
+				path, sys.Name, sys.Protocol, len(sys.Sites), len(sys.Talkgroups), len(sys.Radios))
+		}
 	}
 
 	opts := mergeOptions{
@@ -177,9 +208,9 @@ Flags:
 			renderDryRun(os.Stdout, res, *cfgPath)
 			return
 		}
-		fmt.Fprintf(os.Stderr, "import-pdf: wrote %s\n", *cfgPath)
+		fmt.Fprintf(os.Stderr, "import: wrote %s\n", *cfgPath)
 		for _, c := range res.CSVs {
-			fmt.Fprintf(os.Stderr, "import-pdf: wrote %s\n", c.Path)
+			fmt.Fprintf(os.Stderr, "import: wrote %s\n", c.Path)
 		}
 		return
 	}
@@ -189,7 +220,7 @@ Flags:
 		failErr(err)
 	}
 	if !wrote {
-		fmt.Fprintln(os.Stderr, "import-pdf: no changes written")
+		fmt.Fprintln(os.Stderr, "import: no changes written")
 	}
 }
 
@@ -203,7 +234,7 @@ func (r *repeatedString) Set(v string) error {
 	return nil
 }
 
-// importRep is the diagnostics reporter for the import-pdf command,
+// importRep is the diagnostics reporter for the import command,
 // set at the top of runImport. Both fail and failErr route through it
 // so import errors get the same banner + verbose treatment as the rest
 // of the CLI.
@@ -217,7 +248,7 @@ func fail(msg string) {
 // mode) and exits 1.
 func failErr(err error) {
 	if importRep == nil {
-		importRep = newReporter("import-pdf")
+		importRep = newReporter("import")
 	}
 	importRep.Fatal(1, err)
 }

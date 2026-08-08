@@ -19,7 +19,7 @@ import (
 // console-only counterpart to `gophertrunk config serve`. It edits config
 // files on the local filesystem (no daemon, no browser) and is also the
 // landing point for bare `gophertrunk config` and the legacy
-// `import-pdf -wizard`.
+// `import -wizard`.
 func runConfigTUI(args []string) {
 	fs := flag.NewFlagSet("config tui", flag.ExitOnError)
 	configDir := fs.String("config-dir", "", "directory to browse and save configs in (default: the standard discovery locations)")

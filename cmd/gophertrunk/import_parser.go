@@ -14,7 +14,8 @@ import (
 	"github.com/ledongthuc/pdf"
 )
 
-// parsedSystem is the result of importing one RadioReference PDF.
+// parsedSystem is the result of importing one system from any source — a
+// RadioReference PDF or CSV, or one system out of an SDRTrunk playlist.
 type parsedSystem struct {
 	Name       string            `json:"name"`
 	Location   string            `json:"location"`
@@ -25,7 +26,15 @@ type parsedSystem struct {
 	Protocol   string            `json:"protocol"`
 	Sites      []parsedSite      `json:"sites"`
 	Talkgroups []parsedTalkgroup `json:"talkgroups"`
-	SourcePath string            `json:"-"`
+	// Radios is the optional radio-ID (subscriber) alias catalogue. Only the
+	// SDRTrunk importer populates it — RadioReference exports carry no RIDs —
+	// and it is written to a per-system rid_alias_file when non-empty.
+	Radios []parsedRadio `json:"radios,omitempty"`
+	// P25DemodMode, when non-empty, is written as the system's
+	// p25_phase1_demod_mode. Only set by sources that record the modulation
+	// (SDRTrunk playlists do; RadioReference does not).
+	P25DemodMode string `json:"p25_demod_mode,omitempty"`
+	SourcePath   string `json:"-"`
 }
 
 type parsedSite struct {
@@ -52,6 +61,18 @@ type parsedTalkgroup struct {
 	Tag         string `json:"tag"`
 	Group       string `json:"group"`
 	Scan        bool   `json:"scan"`
+	Priority    int    `json:"priority"`
+	Lockout     bool   `json:"lockout"`
+}
+
+// parsedRadio is one radio-ID (subscriber unit) alias, written out as a row
+// of the per-system rid_alias_file CSV.
+type parsedRadio struct {
+	Dec         uint32 `json:"dec"`
+	Alias       string `json:"alias"`
+	Description string `json:"description"`
+	Tag         string `json:"tag"`
+	Group       string `json:"group"`
 	Priority    int    `json:"priority"`
 	Lockout     bool   `json:"lockout"`
 }
@@ -99,7 +120,7 @@ func parsePDFFile(path string) (parsedSystem, error) {
 func extractPDFRows(path string) ([]parseRow, error) {
 	f, r, err := pdf.Open(path)
 	if err != nil {
-		return nil, fmt.Errorf("import-pdf: open %s: %w", path, err)
+		return nil, fmt.Errorf("import: open %s: %w", path, err)
 	}
 	defer f.Close()
 
@@ -355,7 +376,7 @@ func parseSystem(rows []parseRow) (parsedSystem, error) {
 		return sys, formatNoSystemNameError(rows)
 	}
 	if len(sys.Sites) == 0 && len(sys.Talkgroups) == 0 {
-		return sys, errors.New("import-pdf: PDF contained no sites or talkgroups")
+		return sys, errors.New("import: PDF contained no sites or talkgroups")
 	}
 	// Default site Include=true so the TUI starts with everything on.
 	for i := range sys.Sites {
@@ -790,7 +811,7 @@ func formatNoSystemNameError(rows []parseRow) error {
 		maxText  = 120
 	)
 	var b strings.Builder
-	b.WriteString("import-pdf: no System Name found — wrong PDF?\n")
+	b.WriteString("import: no System Name found — wrong PDF?\n")
 	b.WriteString("hint: re-run with -extract-only to share a JSON fixture (see docs/import.md)\n")
 	b.WriteString("first extracted rows (page/Y/text, text truncated at 120 runes):")
 	count := 0
@@ -852,7 +873,7 @@ type SystemConfigYAML struct {
 func readFile(path string) ([]byte, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("import-pdf: read %s: %w", path, err)
+		return nil, fmt.Errorf("import: read %s: %w", path, err)
 	}
 	return b, nil
 }

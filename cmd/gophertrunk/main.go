@@ -113,7 +113,12 @@ func main() {
 		// single-file capture-to-analysis case. Distinct from hunt's CSV
 		// "import bundle" (that CSV is stored inside a GopherTrunk Bundle).
 		runBundle(os.Args[2:])
+	case "import":
+		runImport(os.Args[2:])
 	case "import-pdf":
+		// Deprecated alias: the subcommand predates the CSV and SDRTrunk
+		// sources, so its name no longer covers what it does.
+		fmt.Fprintln(os.Stderr, "gophertrunk: import-pdf is now `gophertrunk import` (same flags); this alias will keep working")
 		runImport(os.Args[2:])
 	case "daemon", "run":
 		runDaemon(os.Args[2:])
@@ -151,7 +156,7 @@ USAGE:
   gophertrunk siglab serve [flags]    offline signal-analysis web console (browser UI)
   gophertrunk config serve [flags]    standalone web Config Builder/Editor (browser UI)
   gophertrunk config [tui] [flags]    standalone terminal Config Builder/Editor (no browser)
-  gophertrunk import-pdf [flags]      import a RadioReference PDF into config.yaml
+  gophertrunk import [flags]          import systems into config.yaml (RadioReference PDF/CSV, SDRTrunk playlist)
   gophertrunk version                 print build version
   gophertrunk help                    show this message`)
 }

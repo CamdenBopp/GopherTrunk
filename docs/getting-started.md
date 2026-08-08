@@ -85,7 +85,7 @@ captures and discovery:
   offline, auto-detect its protocol, export JSON/YAML/CSV.
 - `gophertrunk hunt` — discover and map an unknown trunked system
   ([Hunt](hunt.html)).
-- `gophertrunk import-pdf` — pull a RadioReference PDF straight into your config
+- `gophertrunk import` — pull a RadioReference PDF straight into your config
   ([Import](import.html)).
 
 The **SigLab** and **Config Builder** interfaces above wrap this workbench in

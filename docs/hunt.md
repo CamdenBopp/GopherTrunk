@@ -173,7 +173,7 @@ Select with `-formats` (comma-separated; default is all three):
 
 | Value | File | Contents |
 |---|---|---|
-| `bundle` | `<name>.csv` | GopherTrunk multi-section import bundle — round-trips back in via `import-pdf -csv` (and is what `-commit` writes). |
+| `bundle` | `<name>.csv` | GopherTrunk multi-section import bundle — round-trips back in via `import -csv` (and is what `-commit` writes). |
 | `trunk-recorder` | `<name>.json` | A trunk-recorder system config stanza (control channels + type + modulation). |
 | `rr` | `<name>-radioreference.md` | A human-readable RadioReference submission package (identity, sites, control channels, observed talkgroups) with the Submit link. |
 

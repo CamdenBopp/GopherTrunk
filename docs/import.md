@@ -1,15 +1,15 @@
 ---
 layout: page
-title: Import (PDF / CSV)
-description: Importing trunked-system definitions from RadioReference PDFs and structured CSV bundles into config.yaml
+title: Import (PDF / CSV / SDRTrunk)
+description: Importing trunked-system definitions from RadioReference PDFs, structured CSV bundles, and SDRTrunk playlists into config.yaml
 nav_group: Operate
 ---
 
-# `gophertrunk import-pdf`
+# `gophertrunk import`
 
-The `import-pdf` subcommand parses trunked-system data from two sources
-and merges it into your `config.yaml`, generating per-system Trunk-
-Recorder-style talkgroup CSVs as it goes:
+The `import` subcommand parses trunked-system data from several
+sources and merges it into your `config.yaml`, generating per-system
+Trunk-Recorder-style talkgroup CSVs as it goes:
 
 - **RadioReference.com PDF exports** — choose **PDF** from the
   **Download** menu near the top of any P25 trunking-system page (URL
@@ -24,15 +24,21 @@ Recorder-style talkgroup CSVs as it goes:
   somewhere other than RadioReference (the radio wiki for your region,
   a hand-curated spreadsheet, an export from another scanner program,
   …).
+- **SDRTrunk playlists** — SDRTrunk's own configuration file
+  (`~/SDRTrunk/playlist/default.xml`). Carries channels *and* aliases,
+  so one playlist can bring several systems, their control-channel
+  frequencies, their modulation, and their whole talkgroup / radio-ID
+  catalogue across in a single command. See [quick start —
+  SDRTrunk](#quick-start--sdrtrunk-playlist).
 
-Both sources flow through the same TUI, the same writer, and the
+Every source flows through the same TUI, the same writer, and the
 same atomic-merge pipeline, so the daemon-side outputs are identical
 regardless of input format.
 
-> **Why the name?** The subcommand started PDF-only; the `-pdf` name
-> is now slightly misleading but kept for backwards compatibility. Pass
-> any combination of `-pdf` and `-csv` flags — they may be mixed in a
-> single invocation.
+> The subcommand started PDF-only under the name `import-pdf`; that name
+> still works as a deprecated alias. Pass any combination of `-pdf`,
+> `-csv` and `-sdrtrunk` flags — they may be mixed in a single
+> invocation.
 
 ## Quick start — PDF (RadioReference)
 
@@ -45,7 +51,7 @@ regardless of input format.
 3. Run:
 
    ```
-   gophertrunk import-pdf \
+   gophertrunk import \
      -pdf maricopa.pdf \
      -pdf rwc.pdf \
      -config /etc/gophertrunk/config.yaml
@@ -62,7 +68,7 @@ table with no system metadata and no site/frequency rows. Pair it
 with `-name` and (optionally) `-sysid` to supply the missing data:
 
 ```
-gophertrunk import-pdf \
+gophertrunk import \
   -csv talkgroups-49A.csv \
   -name "Maricopa County" -sysid 49A \
   -config /etc/gophertrunk/config.yaml
@@ -77,13 +83,69 @@ native CSV doesn't carry. Either pass a `-pdf` alongside the `-csv`
 in the same invocation, or hand-edit the resulting
 `trunking.systems[].control_channels` block after the import.
 
+## Quick start — SDRTrunk playlist
+
+If you already run [SDRTrunk](https://github.com/DSheirer/sdrtrunk),
+its playlist is a complete description of your systems — import it
+directly instead of re-entering anything:
+
+```
+gophertrunk import -sdrtrunk auto -config /etc/gophertrunk/config.yaml
+```
+
+`auto` discovers SDRTrunk's default playlist at
+`~/SDRTrunk/playlist/default.xml`, falling back to `~/sdrtrunk/playlist`
+for source checkouts used as the data root. You can also pass the playlist file
+itself, the directory holding it, your SDRTrunk data root, or (on
+macOS) `/Applications/SDRTrunk.app` — the bundle holds no user data, so
+that falls back to the default location:
+
+```
+gophertrunk import -sdrtrunk ~/SDRTrunk/playlist/default.xml -dry-run
+```
+
+### What comes across
+
+| SDRTrunk | GopherTrunk |
+| --- | --- |
+| `<channel system="…">` | one `trunking.systems[]` entry per distinct system name |
+| `<channel site="…">` | one site in the review TUI; channels sharing a site merge |
+| `<source_configuration>` frequencies | `control_channels` (deduplicated across the system's sites) |
+| `<decode_configuration type>` | `protocol` — P25 P1/P2, DMR, NXDN, LTR, MPT1327 |
+| `modulation="CQPSK"` / `"LSM"` | `p25_phase1_demod_mode: cqpsk` (C4FM leaves the default) |
+| `<alias>` + `<id type="talkgroup">` | a row in the system's talkgroup CSV |
+| `<id type="talkgroupRange">` | expanded to individual rows (ranges wider than 1024 are skipped and reported) |
+| `<alias>` + `<id type="radio">` | a row in a per-system RID CSV, wired up as `rid_alias_file` |
+| `<id type="priority" priority="N">` | `Priority` column; SDRTrunk's `-1` (do-not-monitor) becomes `Lockout` |
+| alias `group` | the talkgroup's `Group` column |
+
+Aliases are scoped the way SDRTrunk scopes them — by the
+`alias_list_name` each channel references — so a system only receives
+the alias lists its own channels use.
+
+### Caveats
+
+- **Conventional channels are skipped.** NBFM / AM / Passport channels
+  have no trunking pipeline in GopherTrunk; each one is reported on
+  stderr as it is skipped.
+- **Modulation is per system, not per site.** SDRTrunk stores C4FM vs
+  CQPSK per channel. If two sites of one system disagree, the first
+  channel wins and the conflict is printed — split the system in two,
+  or fix `p25_phase1_demod_mode` by hand, if that choice is wrong.
+- **RFSS / site IDs don't come across.** SDRTrunk records site names
+  only, so no `sites:` name catalogue is written; the daemon still
+  discovers RFSS/site from the control channel.
+- **The `enabled` attribute is SDRTrunk's auto-start flag**, not an
+  "ignore this channel" flag, so every trunked channel is imported.
+  Prune what you don't want in the review TUI.
+
 ## Quick start — CSV bundle
 
 1. Build a CSV file in the format below (one file per system).
 2. Run:
 
    ```
-   gophertrunk import-pdf \
+   gophertrunk import \
      -csv my-system.csv \
      -config /etc/gophertrunk/config.yaml
    ```
@@ -234,15 +296,15 @@ Skip the TUI with `-no-tui` (useful for CI bring-up). Preview the
 changes without writing using `-dry-run`:
 
 ```
-gophertrunk import-pdf -pdf maricopa.pdf -config config.yaml -no-tui -dry-run
-gophertrunk import-pdf -csv my-system.csv -config config.yaml -no-tui -dry-run
+gophertrunk import -pdf maricopa.pdf -config config.yaml -no-tui -dry-run
+gophertrunk import -csv my-system.csv -config config.yaml -no-tui -dry-run
 ```
 
 Re-importing a system whose `name` already exists in `config.yaml`
 requires `-force`:
 
 ```
-gophertrunk import-pdf -csv rwc.csv -config config.yaml -no-tui -force
+gophertrunk import -csv rwc.csv -config config.yaml -no-tui -force
 ```
 
 Without `-force` the importer aborts before touching anything on disk.
@@ -253,6 +315,7 @@ Without `-force` the importer aborts before touching anything on disk.
 | --- | --- |
 | `-pdf <file.pdf>` | RadioReference PDF (repeatable). |
 | `-csv <file.csv>` | CSV file (repeatable). Either a multi-section bundle (this page) or RadioReference's native CSV (auto-detected). |
+| `-sdrtrunk <path>` | SDRTrunk playlist XML (repeatable). Accepts the playlist file, its directory, your SDRTrunk data root, `SDRTrunk.app`, or `auto` to discover `~/SDRTrunk/playlist` (or `~/sdrtrunk/playlist`). |
 | `-config <path>` | Existing `config.yaml` (merged in place). Default `./config.yaml`. |
 | `-csv-dir <dir>` | Where to write talkgroup CSVs. Default: directory of `-config`. |
 | `-no-tui` | Skip the review TUI; merge straight from parsed defaults. |
@@ -278,15 +341,15 @@ Three usage patterns:
 
 ```
 # Build a fresh config from scratch (no PDF / CSV imports).
-gophertrunk import-pdf -wizard
+gophertrunk import -wizard
 
 # Build a fresh config and immediately merge a RadioReference PDF
 # on top of it — the wizard runs first, then the existing site-
 # review TUI takes over.
-gophertrunk import-pdf -wizard -pdf maricopa.pdf
+gophertrunk import -wizard -pdf maricopa.pdf
 
 # Write to a custom path.
-gophertrunk import-pdf -wizard -config /etc/gophertrunk/config.yaml
+gophertrunk import -wizard -config /etc/gophertrunk/config.yaml
 ```
 
 ### Wizard key bindings
@@ -331,6 +394,11 @@ it isn't (e.g. launched from `C:\Program Files\GopherTrunk\`).
   This is the same format `internal/trunking.TalkgroupDB.LoadCSV`
   understands, so the daemon picks the file up on the next start
   without any extra wiring.
+- **`rids-<slug>-<sysid>.csv`** — only when the source carries radio-ID
+  aliases (today: SDRTrunk playlists). Columns:
+  `Decimal,Alias,Description,Tag,Group,Priority,Lockout`, matching
+  `internal/trunking.LoadRIDCSV`. The system's `rid_alias_file` is set
+  to point at it.
 
 Writes are atomic: each CSV and the config are written to a temp file
 in the destination directory and `rename(2)`-d into place after both
@@ -343,6 +411,8 @@ the struct-level and node-level YAML schema validations pass.
 | PDF | Project 25 Phase 1 / Phase 2 | Supported |
 | PDF | DMR / NXDN / TETRA / EDACS | Not yet — the PDF layouts differ |
 | CSV | P25 / DMR / NXDN | Supported (protocol declared in `metadata`) |
+| SDRTrunk playlist | P25 Phase 1 / Phase 2, DMR, NXDN, LTR, MPT1327 | Supported (protocol taken from each channel's decoder) |
+| SDRTrunk playlist | Conventional NBFM / AM, Passport | Skipped, and reported on stderr |
 
 The PDF importer always sets `protocol: p25` for the parsed system,
 since the RadioReference Phase 1 and Phase 2 PDFs share the same
@@ -359,7 +429,7 @@ correct for Phase 1 captures.
   ASCII codepoint. The importer reverses the shift per-glyph during
   extraction. If RadioReference changes the encoding the importer
   will produce gibberish — open an issue and attach the JSON output of
-  `gophertrunk import-pdf -pdf <file> -extract-only` (and the PDF
+  `gophertrunk import -pdf <file> -extract-only` (and the PDF
   itself if you can). The dump is also surfaced inline whenever the
   parser fails to find a system name.
 - **Field-label tolerance.** Metadata labels (`System Name:`,

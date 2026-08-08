@@ -434,7 +434,7 @@ working scanner is:
 - `trunking.systems[].control_channels` — list of control-channel
   frequencies in Hz.
 - `trunking.systems[].talkgroup_file` — path to a Trunk-Recorder-style
-  talkgroup CSV. Generate one with `gophertrunk import-pdf` (§ 10)
+  talkgroup CSV. Generate one with `gophertrunk import` (§ 10)
   or hand-author per
   [`import.md#csv-format`]({{ '/import.html#csv-format' | relative_url }}).
 
@@ -443,7 +443,7 @@ working scanner is:
 First-time operators can skip hand-editing entirely:
 
 ```powershell
-gophertrunk import-pdf -wizard
+gophertrunk import -wizard
 ```
 
 The wizard asks one question per config section (log level, API
@@ -456,7 +456,7 @@ Combine with a RadioReference import to bootstrap a region in one
 pass:
 
 ```powershell
-gophertrunk import-pdf -wizard -pdf maricopa.pdf
+gophertrunk import -wizard -pdf maricopa.pdf
 ```
 
 Full reference: [`import.md`]({{ '/import.html' | relative_url }}).
@@ -720,19 +720,22 @@ prompt on first connect.
 
 Full reference: [`web.md`]({{ '/web.html' | relative_url }}).
 
-## 10. Import trunked systems from RadioReference
+## 10. Import trunked systems (RadioReference, SDRTrunk)
 
-The `import-pdf` subcommand parses two source types and merges them
+The `import` subcommand parses several source formats and merges them
 into your `config.yaml`, generating Trunk-Recorder-style talkgroup
 CSVs as it goes:
 
-- **RadioReference.com PDF exports** — the **Download** menu near the
-  top of any P25 trunking-system page (offers PDF / CSV / DSD).
-- **RadioReference native CSV** — the **CSV** option from the same
-  Download menu. Flat talkgroup list; pair with `-name` and `-sysid`.
-- **Structured CSV bundles** — a single multi-section CSV file per
-  system (format documented in
+- **RadioReference.com PDF exports** (`-pdf`) — the **Download** menu
+  near the top of any P25 trunking-system page (offers PDF / CSV / DSD).
+- **RadioReference native CSV** (`-csv`) — the **CSV** option from the
+  same Download menu. Flat talkgroup list; pair with `-name` and `-sysid`.
+- **Structured CSV bundles** (`-csv`) — a single multi-section CSV file
+  per system (format documented in
   [`import.md#csv-format`]({{ '/import.html#csv-format' | relative_url }})).
+- **SDRTrunk playlists** (`-sdrtrunk`) — SDRTrunk's own configuration,
+  bringing over every trunked system at once: control channels per
+  site, protocol and modulation, and the alias lists as talkgroup CSVs.
 
 ### Quick start — RadioReference PDF
 
@@ -743,7 +746,7 @@ CSVs as it goes:
 2. Run:
 
    ```powershell
-   gophertrunk import-pdf `
+   gophertrunk import `
      -pdf maricopa.pdf `
      -config "$HOME\gophertrunk.yaml"
    ```
@@ -752,10 +755,22 @@ CSVs as it goes:
    Scan / Lockout / Priority on talkgroups, press `w` to write or
    `q` to discard.
 
+### Quick start — SDRTrunk playlist
+
+Already running SDRTrunk? Bring its whole configuration across in one
+pass — `auto` finds the default playlist under your SDRTrunk data
+folder:
+
+```powershell
+gophertrunk import `
+  -sdrtrunk auto `
+  -config "$HOME\gophertrunk.yaml"
+```
+
 ### Quick start — CSV bundle
 
 ```powershell
-gophertrunk import-pdf `
+gophertrunk import `
   -csv my-system.csv `
   -config "$HOME\gophertrunk.yaml"
 ```
@@ -1359,7 +1374,7 @@ gophertrunk sdr list                list discovered SDR devices
 gophertrunk audio list              list audio output devices
 gophertrunk tui [-server URL]       open the operator TUI
 gophertrunk decode [flags]          decode a captured .raw frame stream into a WAV
-gophertrunk import-pdf [flags]      import a RadioReference PDF / CSV bundle
+gophertrunk import [flags]          import a RadioReference PDF / CSV bundle or SDRTrunk playlist
 gophertrunk version                 print build version + git SHA + build time
 gophertrunk help                    show usage
 ```

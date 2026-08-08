@@ -264,8 +264,8 @@ Silicon and Intel. Full per-OS recipes at
   continuous source.
 - **Operator surfaces** — Bubbletea TUI cockpit with 12 panels,
   pure-browser React SPA web console, runtime config editing via
-  `PATCH /api/v1/settings`, RadioReference PDF / CSV importer with
-  a config-builder wizard.
+  `PATCH /api/v1/settings`, RadioReference PDF / CSV and SDRTrunk
+  playlist importers with a config-builder wizard.
 - **Site/system hunting** — `gophertrunk hunt` maps a previously
   undocumented trunked system from one or more control-channel IQ
   captures: auto-identifies the protocol, accumulates identity

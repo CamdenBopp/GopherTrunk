@@ -7,7 +7,27 @@ for tagged releases.
 
 ## [Unreleased]
 
+### Changed
+- **`import-pdf` is now `gophertrunk import`.** The subcommand outgrew its
+  name once CSV bundles and SDRTrunk playlists joined the PDF path, so it is
+  now plain `import` with the same flags. `import-pdf` keeps working as a
+  deprecated alias that prints a pointer to the new name.
+
 ### Added
+- **`import` now imports an SDRTrunk playlist directly.**
+  `gophertrunk import -sdrtrunk auto` reads SDRTrunk's own configuration
+  (`~/SDRTrunk/playlist/default.xml`, or any path/data root/`SDRTrunk.app` you
+  point it at) and merges every trunked system in it into `config.yaml` —
+  control-channel frequencies per site, the protocol and P25 Phase 1
+  modulation from each channel's decoder, and the alias lists those channels
+  reference as talkgroup CSVs. Radio-ID aliases become a per-system RID
+  catalogue wired up as `rid_alias_file`, and SDRTrunk's do-not-monitor
+  priority (`-1`) carries across as a talkgroup lockout. Conventional
+  (NBFM/AM/Passport) channels and over-wide talkgroup ranges are skipped with
+  a reason on stderr; sites of one system that disagree on C4FM vs CQPSK are
+  reported rather than silently resolved, since GopherTrunk sets the
+  modulation per system. Everything flows through the existing review TUI and
+  atomic comment-preserving merge. See [docs/import.md](docs/import.md).
 - **DMR now auto-corrects a small residual tuner carrier offset.** The
   narrowband DMR C4FM decoder tolerates only ~±75 Hz of carrier error before
   the 4-level slicer mis-decides and nothing decodes (issue #836) — at 446 MHz

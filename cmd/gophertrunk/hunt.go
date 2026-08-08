@@ -94,7 +94,7 @@ func runHunt(args []string) {
 	var rrCheckSIDs repeatedString
 	fs.Var(&rrCheckSIDs, "rr-check-sid", "RadioReference system id to compare against (repeatable)")
 
-	commit := fs.Bool("commit", false, "merge the discovered system into config.yaml (like import-pdf)")
+	commit := fs.Bool("commit", false, "merge the discovered system into config.yaml (like import)")
 	// List-driven capture: record one signal from a prior survey's JSON and hand
 	// it to SigLab / CryptoLab.
 	surveyCapture := fs.String("survey-capture", "", "record IQ of one signal from a -from survey.json (a frequency in MHz, or #INDEX) and hand it to SigLab/CryptoLab")
